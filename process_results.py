@@ -260,20 +260,24 @@ def compare_results(result_list):
     print("\n###############")
     print("### Summary ###")
     print("###############")
-    
-    for cat, cat_score in all_cats.items():
+
+    for cat in sorted(all_cats.keys()):
+        cat_score = all_cats[cat]
+        
         print(f"\nCategory {cat} (conflicts={resolve_conflicts}):")
         res_list = []
         max_score = max(cat_score.values())
                 
         for tool, score in cat_score.items():
             percent = max(min_percent, 100 * score / max_score)
-            desc = f"{tool}: {score} ({round(percent, 2)}%)"
+            #desc = f"{tool}: {score} ({round(percent, 2)}%)"
+            desc = f"{tool},{score},{round(percent, 2)}%"
 
             res_list.append((percent, desc))
 
         for i, s in enumerate(reversed(sorted(res_list))):
-            print(f"{i+1}. {s[1]}")
+            #print(f"{i+1}. {s[1]}")
+            print(f"{s[1]}")
 
     res_list = []
 
@@ -381,7 +385,7 @@ def print_stats(result_list):
             l.append((count, name))
         
         for i, s in enumerate(reversed(sorted(l))):
-            print(f"{i+1}. {s}")
+            print(f"{i+1},{s[1]},{s[0]}")
 
 def main():
     """main entry point"""
