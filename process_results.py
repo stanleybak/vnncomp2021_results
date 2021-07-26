@@ -31,12 +31,18 @@ class ToolResult:
 
     num_categories = defaultdict(int)
 
-    def __init__(self, tool_name, csv_path):
+    def __init__(self, tool_name, csv_path, split_cpu_gpu_overhead, cpu_benchmarks=None):
         assert "csv" in csv_path
-        
+
+
         self.tool_name = tool_name
         self.category_to_list = defaultdict(list) # maps category -> list of results
         self.overhead = np.inf
+        self.split_cpu_gpu_overhead = split_cpu_gpu_overhead
+        self.cpu_benchmarks = [] if cpu_benchmarks is None else cpu_benchmarks
+        if split_cpu_gpu_overhead:
+            self.gpu_overhead = np.inf
+            self.cpu_overhead = np.inf
         self.max_prepare = 0.0
 
         self.load(csv_path)
@@ -59,7 +65,10 @@ class ToolResult:
         res = row[ToolResult.RESULT]
         t = float(row[ToolResult.RUN_TIME])
 
-        t -= self.overhead
+        if self.split_cpu_gpu_overhead:
+            t -= self.cpu_overhead if cat in self.cpu_benchmarks else self.gpu_overhead
+        else:
+            t -= self.overhead
 
         # all results less than 1.0 second are treated the same
         if t < 1.0:
@@ -104,13 +113,19 @@ class ToolResult:
                     unexpected_results.add(result)
 
                 if result in ["holds", "violated"]:
-                    self.overhead = min(self.overhead, run_time)
+                    if self.split_cpu_gpu_overhead:
+                        if cat in self.cpu_benchmarks:
+                            self.cpu_overhead = min(self.cpu_overhead, run_time)
+                        else:
+                            self.gpu_overhead = min(self.gpu_overhead, run_time)
+                    else:
+                        self.overhead = min(self.overhead, run_time)
                     self.max_prepare = max(self.max_prepare, prepare_time)
 
-        assert self.overhead != np.inf, f"no successful results for {self.tool_name}"
+        assert self.overhead != np.inf or (self.gpu_overhead != np.inf and self.cpu_overhead != np.inf), f"no successful results for {self.tool_name}"
         assert not unexpected_results, f"Unexpected results: {unexpected_results}"
 
-        print(f"Loaded {self.tool_name}, overhead: {round(self.overhead, 1)}s, " + \
+        print(f"Loaded {self.tool_name}, overhead: {round(self.overhead if not self.split_cpu_gpu_overhead else max(self.gpu_overhead, self.cpu_overhead), 1) }s, " + \
               f"prepare time: {round(self.max_prepare, 1)}s")
 
         self.delete_empty_categories()
@@ -151,7 +166,8 @@ def compare_results(result_list):
     # "voting": majority rules, tie = ighore
     # "odd_one_out": only if single tool has mismatch, assume it's wrong
     # "ignore": ignore all conflicts
-    resolve_conflicts = "odd_one_out"
+    # resolve_conflicts = "odd_one_out"
+    resolve_conflicts = "voting"
 
     min_percent = 0 # minimum percent for total score
 
@@ -365,7 +381,7 @@ def print_stats(result_list):
     print('\n------- Stats ----------')
 
     print("\nOverhead:")
-    olist = [(r.overhead, f"{r.tool_name} - {round(r.overhead, 1)} sec") for r in result_list]
+    olist = [(r.overhead if not r.split_cpu_gpu_overhead else max(r.gpu_overhead, r.cpu_overhead), f"{r.tool_name} - {round(r.overhead if not r.split_cpu_gpu_overhead else max(r.gpu_overhead, r.cpu_overhead), 1)} sec") for r in result_list]
     for i, n in enumerate(sorted(olist)):
         print(f"{i+1}. {n[1]}")
 
@@ -394,8 +410,15 @@ def main():
     tool_list = [Path(c).stem for c in csv_list]
     result_list = []
 
+    split_cpu_gpu_overhead = True   # Set to True to apply separate overhead computation for the benchmarks as listed below
+
+    cpu_benchmarks = {x: None for x in tool_list}
+    if split_cpu_gpu_overhead: # Define a dict with the cpu_only benchmarks (for separate overhead computation) for the gpu tools
+        cpu_benchmarks["ERAN"] = ["acasxu", "eran"]
+        # add other tools here if desired
+
     for csv_path, tool_name in zip(csv_list, tool_list):
-        result_list.append(ToolResult(tool_name, csv_path))
+        result_list.append(ToolResult(tool_name, csv_path, split_cpu_gpu_overhead=cpu_benchmarks[tool_name] is not None, cpu_benchmarks=cpu_benchmarks[tool_name]))
 
     # compare results across tools
     compare_results(result_list)
