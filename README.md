@@ -1,6 +1,6 @@
 # vnncomp2021_results
 
-results for vnncomp 2021. The csv files for all tools are in results_csv. The scores are computed using process_results.py, with stdout redirected to output_voting.txt or output_odd_one_out.txt 
+results for vnncomp 2021. The csv files for all tools are in results_csv. The scores are computed using process_results.py, with stdout redirected to the output_*.txt files.
 
 Summary scores are near the end of the file. You can check a specific benchmark by looking in the file. For example, to see network 4-2 property 2 of acasxu, I can look for the file for the following part:
 
@@ -31,7 +31,7 @@ The runtime was 7.374020909, which after subtracting the overhead of 1.0 secs yo
 
 The scores are also listed for each tool. Since nneum was the fastest, it got 12 points (10 for corrext + 2 for time bouns as fastest. Venus2, at 10.5 seconds, was the second fastest so it get 11 points. None of the remaining tools were within two seconds, so they all got 10 points.
 
-You can adjust how incorrect results are judged by changing line 154 in the code:
+You can adjust some parameters in the scoring defined in main(). Specifically, you can change how incorrect results are judged by changing `resolve_conflicts` in the code:
 
 ```
 # how to resolve conflicts (some tools output holds others output violated)
@@ -40,3 +40,12 @@ You can adjust how incorrect results are judged by changing line 154 in the code
 # "ignore": ignore all conflicts
 resolve_conflicts = "voting"
 ```
+
+### Changes from VNNCOMP Presentation Results
+Based on additional feedback from tool authors, we made the following changes after the VNNCOMP presentation. All changes to scoring can be adjusted through flags in the `main()` function.
+    
+1. ERAN included optimized overhead for benchamarks that didn't use the GPU. This optimization had the side effect of reducing their overhead measurement for all benchmarks, inflating their times on GPU benchmarks by a few seconds (and thus reducing their score).
+
+You can change how overhead is measured by modifying the `single_overhead` flag. If True, then a uniform overhead is used for all measurements per tool (original). If False, ERAN will use a separate overhead measurement for the acasxu and eran benchmarks.
+
+2. Neural Network Reach renamed to RPM. Also RPM's mnistfc results have been removed due to a VNNLIB parsing bug on that benchmark found after the competition. This can be disabled by commenting out the line: `skip_benchmarks['RPM'] = ['minstfc']`

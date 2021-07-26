@@ -31,18 +31,17 @@ class ToolResult:
 
     num_categories = defaultdict(int)
 
-    def __init__(self, tool_name, csv_path, split_cpu_gpu_overhead, cpu_benchmarks=None):
+    def __init__(self, tool_name, csv_path, cpu_benchmarks, skip_benchmarks):
         assert "csv" in csv_path
-
 
         self.tool_name = tool_name
         self.category_to_list = defaultdict(list) # maps category -> list of results
-        self.overhead = np.inf
-        self.split_cpu_gpu_overhead = split_cpu_gpu_overhead
-        self.cpu_benchmarks = [] if cpu_benchmarks is None else cpu_benchmarks
-        if split_cpu_gpu_overhead:
-            self.gpu_overhead = np.inf
-            self.cpu_overhead = np.inf
+
+        self.skip_benchmarks = skip_benchmarks
+        self.cpu_benchmarks = cpu_benchmarks
+        self.gpu_overhead = np.inf # default overhead
+        self.cpu_overhead = np.inf # if using separate overhead for cpu
+        
         self.max_prepare = 0.0
 
         self.load(csv_path)
@@ -65,10 +64,7 @@ class ToolResult:
         res = row[ToolResult.RESULT]
         t = float(row[ToolResult.RUN_TIME])
 
-        if self.split_cpu_gpu_overhead:
-            t -= self.cpu_overhead if cat in self.cpu_benchmarks else self.gpu_overhead
-        else:
-            t -= self.overhead
+        t -= self.cpu_overhead if cat in self.cpu_benchmarks else self.gpu_overhead
 
         # all results less than 1.0 second are treated the same
         if t < 1.0:
@@ -106,26 +102,27 @@ class ToolResult:
                 prepare_time = float(row[ToolResult.PREPARE_TIME])
                 run_time = float(row[ToolResult.RUN_TIME])
 
+                if cat in self.skip_benchmarks:
+                    result = row[ToolResult.RESULT] = "unknown"
+
                 if not ("test_nano" in network or "test_tiny" in network):
                     self.category_to_list[cat].append(row)
 
-                if not result in ["holds", "violated", "timeout", "error", "unknown"]:
+                if result not in ["holds", "violated", "timeout", "error", "unknown"]:
                     unexpected_results.add(result)
 
                 if result in ["holds", "violated"]:
-                    if self.split_cpu_gpu_overhead:
-                        if cat in self.cpu_benchmarks:
-                            self.cpu_overhead = min(self.cpu_overhead, run_time)
-                        else:
-                            self.gpu_overhead = min(self.gpu_overhead, run_time)
+                    if cat in self.cpu_benchmarks:
+                        self.cpu_overhead = min(self.cpu_overhead, run_time)
                     else:
-                        self.overhead = min(self.overhead, run_time)
+                        self.gpu_overhead = min(self.gpu_overhead, run_time)
+                        
                     self.max_prepare = max(self.max_prepare, prepare_time)
 
-        assert self.overhead != np.inf or (self.gpu_overhead != np.inf and self.cpu_overhead != np.inf), f"no successful results for {self.tool_name}"
         assert not unexpected_results, f"Unexpected results: {unexpected_results}"
 
-        print(f"Loaded {self.tool_name}, overhead: {round(self.overhead if not self.split_cpu_gpu_overhead else max(self.gpu_overhead, self.cpu_overhead), 1) }s, " + \
+        print(f"Loaded {self.tool_name}, default-overhead (gpu): {round(self.gpu_overhead, 1)}s," + \
+              f"cpu-overhead: {round(self.cpu_overhead, 1)}s, " + \
               f"prepare time: {round(self.max_prepare, 1)}s")
 
         self.delete_empty_categories()
@@ -159,15 +156,8 @@ class ToolResult:
 
         ToolResult.num_categories[self.tool_name] = len(self.category_to_list)
 
-def compare_results(result_list):
+def compare_results(result_list, resolve_conflicts):
     """compare results across tools"""
-
-    # how to resolve conflicts (some tools output holds others output violated)
-    # "voting": majority rules, tie = ighore
-    # "odd_one_out": only if single tool has mismatch, assume it's wrong
-    # "ignore": ignore all conflicts
-    # resolve_conflicts = "odd_one_out"
-    resolve_conflicts = "voting"
 
     min_percent = 0 # minimum percent for total score
 
@@ -381,9 +371,13 @@ def print_stats(result_list):
     print('\n------- Stats ----------')
 
     print("\nOverhead:")
-    olist = [(r.overhead if not r.split_cpu_gpu_overhead else max(r.gpu_overhead, r.cpu_overhead), f"{r.tool_name} - {round(r.overhead if not r.split_cpu_gpu_overhead else max(r.gpu_overhead, r.cpu_overhead), 1)} sec") for r in result_list]
+    olist = []
+
+    for r in result_list:
+        olist.append((r.gpu_overhead, r.cpu_overhead, r.tool_name))
+        
     for i, n in enumerate(sorted(olist)):
-        print(f"{i+1}. {n[1]}")
+        print(f"{i+1}. {n}")
 
     items = [("Num Categories Completed", ToolResult.num_categories),
              ("Num Verified", ToolResult.num_verified),
@@ -406,22 +400,40 @@ def print_stats(result_list):
 def main():
     """main entry point"""
 
+    # use single overhead for all tools. False will have two different overheads for ERAN depending on CPU/GPU
+    single_overhead = True
+    print(f"using single_overhead={single_overhead}")
+
+    # how to resolve conflicts (some tools output holds others output violated)
+    # "voting": majority rules, tie = ighore
+    # "odd_one_out": only if single tool has mismatch, assume it's wrong
+    # "ignore": ignore all conflicts
+    # resolve_conflicts = "odd_one_out"
+    resolve_conflicts = "odd_one_out"
+    print(f"using resolve_conflicts={resolve_conflicts}")
+
+    #####################################3
     csv_list = glob.glob("results_csv/*.csv")
     tool_list = [Path(c).stem for c in csv_list]
     result_list = []
 
-    split_cpu_gpu_overhead = True   # Set to True to apply separate overhead computation for the benchmarks as listed below
-
-    cpu_benchmarks = {x: None for x in tool_list}
-    if split_cpu_gpu_overhead: # Define a dict with the cpu_only benchmarks (for separate overhead computation) for the gpu tools
+    cpu_benchmarks = {x: [] for x in tool_list}
+    skip_benchmarks = {x: [] for x in tool_list}
+    skip_benchmarks['RPM'] = ['mnistfc']
+    
+    if not single_overhead: # Define a dict with the cpu_only benchmarks for each tool
         cpu_benchmarks["ERAN"] = ["acasxu", "eran"]
-        # add other tools here if desired
+
+        # doesn't make much difference:
+        #for t in tool_list:
+        #    cpu_benchmarks[t] = ["acasxu", "eran"]
 
     for csv_path, tool_name in zip(csv_list, tool_list):
-        result_list.append(ToolResult(tool_name, csv_path, split_cpu_gpu_overhead=cpu_benchmarks[tool_name] is not None, cpu_benchmarks=cpu_benchmarks[tool_name]))
+        tr = ToolResult(tool_name, csv_path, cpu_benchmarks[tool_name], skip_benchmarks[tool_name])
+        result_list.append(tr)
 
     # compare results across tools
-    compare_results(result_list)
+    compare_results(result_list, resolve_conflicts)
 
     print_stats(result_list)
 
