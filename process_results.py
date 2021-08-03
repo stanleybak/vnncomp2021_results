@@ -270,31 +270,72 @@ def compare_results(result_list, resolve_conflicts):
     for cat in sorted(all_cats.keys()):
         cat_score = all_cats[cat]
         
-        print(f"\nCategory {cat} (conflicts={resolve_conflicts}):")
+        print(f"\n% Category {cat} (conflicts={resolve_conflicts}):")
         res_list = []
         max_score = max(cat_score.values())
+
+        cat_str = cat.replace('_', '-')
+        
+        print_table_header(f"Benchmark \\texttt{{{cat_str}}}", "tab:cat_{cat}",
+                           ("\\# ~", "Tool", "Score", "Percent"), align='llrr')
                 
         for tool, score in cat_score.items():
             percent = max(min_percent, 100 * score / max_score)
             #desc = f"{tool}: {score} ({round(percent, 2)}%)"
-            desc = f"{tool},{score},{round(percent, 2)}%"
+            desc = f"{tool} & {score} & {round(percent, 1)}\\% \\\\"
 
             res_list.append((percent, desc))
 
         for i, s in enumerate(reversed(sorted(res_list))):
             #print(f"{i+1}. {s[1]}")
-            print(f"{s[1]}")
+            print(f"{i+1} & {s[1]}")
+
+        print_table_footer()
 
     res_list = []
 
     print(f"\nTotal Score (conflicts={resolve_conflicts}):")
+
+    print_table_header("Overall Score", "tab:score", ["\\# ~", "Tool", "Score"])
+    
     for tool, score in total_score.items():
-        desc = f"{tool}: {round(score, 2)}"
+        desc = f"{tool} & {round(score, 1)} \\\\"
 
         res_list.append((score, desc))
 
     for i, s in enumerate(reversed(sorted(res_list))):
-        print(f"{i+1}. {s[1]}")
+        print(f"{i+1} & {s[1]}")
+
+    print_table_footer()
+
+def print_table_header(title, label, columns, align=None):
+    """print latex table header"""
+
+    bold_columns = ["\\textbf{" + c + "}" for c in columns]
+
+    if align is None:
+        align = 'l' * len(columns)
+    else:
+        assert len(columns) == len(align)
+
+    print('\n\\begin{table}[h]')
+    print('\\begin{center}')
+    print('\\caption{' + title + '} \\label{' + label + '}')
+    print('{\\setlength{\\tabcolsep}{2pt}')
+    print('\\begin{tabular}[h]{@{}' + align + '@{}}')
+    print('\\toprule')
+    print(' & '.join(bold_columns) + "\\\\")
+    #\textbf{\# ~} & \textbf{Tool} & \textbf{Score}  \\
+    print('\\midrule')
+
+def print_table_footer():
+    """print latex table footer"""
+
+    print('''\\bottomrule
+\\end{tabular}
+}
+\\end{center}
+\\end{table}\n\n''')
 
 def get_score(tool_name, res, secs, rand_gen_succeded, times_holds, times_violated, resolve_conflicts):
     """Get the score for the given result
@@ -375,19 +416,28 @@ def print_stats(result_list):
 
     for r in result_list:
         olist.append((r.gpu_overhead, r.cpu_overhead, r.tool_name))
+
+    print_table_header("Overhead", "tab:overhead", ["\\# ~", "Tool", "Sec", "Alternate"])
         
     for i, n in enumerate(sorted(olist)):
-        print(f"{i+1}. {n}")
+        cpu_overhead = "-" if n[1] == np.inf else round(n[1], 1)
+        
+        print(f"{i+1} & {n[2]} & {round(n[0], 1)} & {cpu_overhead} \\\\")
 
-    items = [("Num Categories Completed", ToolResult.num_categories),
-             ("Num Verified", ToolResult.num_verified),
+    print_table_footer()
+
+    items = [("Num Benchmarks Participated", ToolResult.num_categories),
+             ("Num Instances Verified", ToolResult.num_verified),
              ("Num Violated", ToolResult.num_violated),
              ("Num Holds", ToolResult.num_holds),
-             ('Judged as "Incorrect" Results', ToolResult.incorrect_results),
+             ("Mismatched (Incorrect) Results", ToolResult.incorrect_results),
              ]
 
-    for label, d in items:
-        print(f"\n{label}:")
+    for index, (label, d) in enumerate(items):
+        print(f"\n% {label}:")
+
+        tab_label = f"tab:stats{index}"
+        print_table_header(label, tab_label, ["\\# ~", "Tool", "Count"])
 
         l = []
 
@@ -395,13 +445,15 @@ def print_stats(result_list):
             l.append((count, name))
         
         for i, s in enumerate(reversed(sorted(l))):
-            print(f"{i+1},{s[1]},{s[0]}")
+            print(f"{i+1} & {s[1]} & {s[0]} \\\\")
+
+        print_table_footer()
 
 def main():
     """main entry point"""
 
     # use single overhead for all tools. False will have two different overheads for ERAN depending on CPU/GPU
-    single_overhead = True
+    single_overhead = False
     print(f"using single_overhead={single_overhead}")
 
     # how to resolve conflicts (some tools output holds others output violated)
