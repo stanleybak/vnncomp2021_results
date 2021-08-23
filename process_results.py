@@ -295,7 +295,7 @@ def compare_results(result_list, resolve_conflicts):
         cat_str = cat.replace('_', '-')
         
         print_table_header(f"Benchmark \\texttt{{{cat_str}}}", "tab:cat_{cat}",
-                           ("\\# ~", "Tool", "Num Verified", "Num Falsified", "Num Fastest", "Score", "Percent"),
+                           ("\\# ~", "Tool", "Verified", "Falsified", "Fastest", "Score", "Percent"),
                            align='lllllrr')
                 
         for tool, score_tup in cat_score.items():
