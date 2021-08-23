@@ -4,6 +4,8 @@ Process vnncomp results
 Stanley Bak
 """
 
+from typing import Dict, List
+
 import glob
 import csv
 from pathlib import Path
@@ -167,7 +169,8 @@ def compare_results(result_list, resolve_conflicts):
     for cat in ToolResult.all_categories:
         print(f"\nCategory {cat}:")
 
-        cat_score = defaultdict(int)
+        # maps tool_name -> [score, num_verified, num_falsified, num_fastest]
+        cat_score: Dict[str, List[int, int, int, int]] = {}
         all_cats[cat] = cat_score
 
         num_rows = 0
@@ -240,23 +243,38 @@ def compare_results(result_list, resolve_conflicts):
             for t in participating_tools:
                 res, secs = t.single_result(cat, index)
                 
-                score = get_score(t.tool_name, res, secs, rand_gen_succeeded, times_holds, times_violated,
-                                  resolve_conflicts=resolve_conflicts)
-                print(f"{index}: {t.tool_name} score: {score}")
+                score, is_verified, is_falsified, is_fastest = get_score(t.tool_name, res, secs, rand_gen_succeeded,
+                                                                times_holds, times_violated,
+                                                                resolve_conflicts=resolve_conflicts)
+                print(f"{index}: {t.tool_name} score: {score}, is_ver: {is_verified}, is_fals: {is_falsified}, " + \
+                      f"is_fastest: {is_fastest}")
 
-                cat_score[t.tool_name] += score
+                if t.tool_name in cat_score:
+                    tool_score_tup = cat_score[t.tool_name]
+                else:
+                    tool_score_tup = [0, 0, 0, 0]
+                    cat_score[t.tool_name] = tool_score_tup
 
-        print(f"--------------------")
+                # [score, num_verified, num_falsified, num_fastest]
+                tool_score_tup[0] += score
+                tool_score_tup[1] += 1 if is_verified else 0
+                tool_score_tup[2] += 1 if is_falsified else 0
+                tool_score_tup[3] += 1 if is_fastest else 0
+                tool_score_tup = None
+                
+
+        print("--------------------")
         print(", ".join(tool_names))
 
         for table_row in table_rows:
-              print(", ".join(table_row))
+            print(", ".join(table_row))
 
         print(f"---------\nCategory {cat}:")
 
-        max_score = max(cat_score.values())
+        max_score = max([t[0] for t in cat_score.values()])
                 
-        for tool, score in cat_score.items():
+        for tool, score_tup in cat_score.items():
+            score = score_tup[0]
             percent = max(min_percent, 100 * score / max_score)
             print(f"{tool}: {score} ({round(percent, 2)}%)")
 
@@ -272,17 +290,20 @@ def compare_results(result_list, resolve_conflicts):
         
         print(f"\n% Category {cat} (conflicts={resolve_conflicts}):")
         res_list = []
-        max_score = max(cat_score.values())
+        max_score = max([t[0] for t in cat_score.values()])
 
         cat_str = cat.replace('_', '-')
         
         print_table_header(f"Benchmark \\texttt{{{cat_str}}}", "tab:cat_{cat}",
-                           ("\\# ~", "Tool", "Score", "Percent"), align='llrr')
+                           ("\\# ~", "Tool", "Num Verified", "Num Falsified", "Num Fastest", "Score", "Percent"),
+                           align='lllllrr')
                 
-        for tool, score in cat_score.items():
+        for tool, score_tup in cat_score.items():
+            score, num_verified, num_falsified, num_fastest = score_tup
+            
             percent = max(min_percent, 100 * score / max_score)
             #desc = f"{tool}: {score} ({round(percent, 2)}%)"
-            desc = f"{tool} & {score} & {round(percent, 1)}\\% \\\\"
+            desc = f"{tool} & {num_verified} & {num_falsified} & {num_fastest} & {score} & {round(percent, 1)}\\% \\\\"
 
             res_list.append((percent, desc))
 
@@ -339,6 +360,7 @@ def print_table_footer():
 
 def get_score(tool_name, res, secs, rand_gen_succeded, times_holds, times_violated, resolve_conflicts):
     """Get the score for the given result
+    Actually returns a 4-tuple: score, is_verified, is_falsified, is_fastest
 
     Correct hold: 10 points
     Correct violated (where random tests did not succeed): 10 points
@@ -356,11 +378,14 @@ def get_score(tool_name, res, secs, rand_gen_succeded, times_holds, times_violat
     # "odd_one_out": only if single tool has mismatch, assume it's wrong
     # "ignore": ignore all conflicts
     assert resolve_conflicts in ["voting", "odd_one_out", "ignore"]
+    is_verified = False
+    is_falsified = False
+    is_fastest = False
 
     num_holds = len(times_holds)
     num_violated = len(times_violated)
 
-    if not res in ["holds", "violated"] or num_holds == num_violated:
+    if res not in ["holds", "violated"] or num_holds == num_violated:
         score = 0
     elif resolve_conflicts == "ignore" and num_holds > 0 and num_violated > 0:
         score = 0
@@ -372,6 +397,8 @@ def get_score(tool_name, res, secs, rand_gen_succeded, times_holds, times_violat
 
         ToolResult.num_verified[tool_name] += 1
         ToolResult.num_violated[tool_name] += 1
+
+        is_falsified = True
     elif num_holds > num_violated and res == "violated":
         score = -100
         ToolResult.incorrect_results[tool_name] += 1
@@ -384,19 +411,23 @@ def get_score(tool_name, res, secs, rand_gen_succeded, times_holds, times_violat
         ToolResult.num_verified[tool_name] += 1
 
         if res == "holds":
+            is_verified = True
             times = times_holds.copy()
             ToolResult.num_holds[tool_name] += 1
         else:
             assert res == "violated"
             times = times_violated.copy()
             ToolResult.num_violated[tool_name] += 1
-        
+
+            is_falsified = True
+            
         score = 10
 
         min_time = min(times)
 
         if secs < min_time + 0.2:
             score += 2
+            is_fastest = True
         else:
             times.remove(min_time)
             second_time = min(times)
@@ -404,7 +435,7 @@ def get_score(tool_name, res, secs, rand_gen_succeded, times_holds, times_violat
             if secs < second_time + 0.2:
                 score += 1
 
-    return score
+    return score, is_verified, is_falsified, is_fastest
 
 def print_stats(result_list):
     """print stats about measurements"""
