@@ -158,7 +158,7 @@ class ToolResult:
 
         ToolResult.num_categories[self.tool_name] = len(self.category_to_list)
 
-def compare_results(result_list, resolve_conflicts):
+def compare_results(result_list, resolve_conflicts, single_overhead):
     """compare results across tools"""
 
     min_percent = 0 # minimum percent for total score
@@ -288,7 +288,7 @@ def compare_results(result_list, resolve_conflicts):
     for cat in sorted(all_cats.keys()):
         cat_score = all_cats[cat]
         
-        print(f"\n% Category {cat} (conflicts={resolve_conflicts}):")
+        print(f"\n% Category {cat} (conflicts={resolve_conflicts}, single_overhead={single_overhead}):")
         res_list = []
         max_score = max([t[0] for t in cat_score.values()])
 
@@ -302,8 +302,10 @@ def compare_results(result_list, resolve_conflicts):
             score, num_verified, num_falsified, num_fastest = score_tup
             
             percent = max(min_percent, 100 * score / max_score)
+            tool_latex = latex_tool_name(tool)
+            
             #desc = f"{tool}: {score} ({round(percent, 2)}%)"
-            desc = f"{tool} & {num_verified} & {num_falsified} & {num_fastest} & {score} & {round(percent, 1)}\\% \\\\"
+            desc = f"{tool_latex} & {num_verified} & {num_falsified} & {num_fastest} & {score} & {round(percent, 1)}\\% \\\\"
 
             res_list.append((percent, desc))
 
@@ -315,12 +317,13 @@ def compare_results(result_list, resolve_conflicts):
 
     res_list = []
 
-    print(f"\nTotal Score (conflicts={resolve_conflicts}):")
+    print(f"\nTotal Score (conflicts={resolve_conflicts}, single_overhead={single_overhead}):")
 
     print_table_header("Overall Score", "tab:score", ["\\# ~", "Tool", "Score"])
     
     for tool, score in total_score.items():
-        desc = f"{tool} & {round(score, 1)} \\\\"
+        tool_latex = latex_tool_name(tool)
+        desc = f"{tool_latex} & {round(score, 1)} \\\\"
 
         res_list.append((score, desc))
 
@@ -448,7 +451,7 @@ def print_stats(result_list):
     for r in result_list:
         olist.append((r.gpu_overhead, r.cpu_overhead, r.tool_name))
 
-    print_table_header("Overhead", "tab:overhead", ["\\# ~", "Tool", "Sec", "Alternate"])
+    print_table_header("Overhead", "tab:overhead", ["\\# ~", "Tool", "Seconds", "~~CPU Mode"], align='llrr')
         
     for i, n in enumerate(sorted(olist)):
         cpu_overhead = "-" if n[1] == np.inf else round(n[1], 1)
@@ -468,17 +471,27 @@ def print_stats(result_list):
         print(f"\n% {label}:")
 
         tab_label = f"tab:stats{index}"
-        print_table_header(label, tab_label, ["\\# ~", "Tool", "Count"])
+        print_table_header(label, tab_label, ["\\# ~", "Tool", "Count"], align='llr')
 
         l = []
 
-        for name, count in d.items():
-            l.append((count, name))
+        for tool, count in d.items():
+            tool_latex = latex_tool_name(tool)
+            
+            l.append((count, tool_latex))
         
         for i, s in enumerate(reversed(sorted(l))):
             print(f"{i+1} & {s[1]} & {s[0]} \\\\")
 
         print_table_footer()
+
+def latex_tool_name(tool):
+    """get latex version of tool name"""
+
+    if tool == 'a-b-CROWN':
+        tool = '$\\alpha$,$\\beta$-CROWN'
+
+    return tool
 
 def main():
     """main entry point"""
@@ -516,7 +529,7 @@ def main():
         result_list.append(tr)
 
     # compare results across tools
-    compare_results(result_list, resolve_conflicts)
+    compare_results(result_list, resolve_conflicts, single_overhead)
 
     print_stats(result_list)
 
